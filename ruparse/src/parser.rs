@@ -1471,6 +1471,82 @@ pub struct ParseResult {
     pub globals: Map<String, VariableKind>,
 }
 
+pub mod map_tools {
+    use super::*;
+
+    pub fn try_get_node<'a>(map: &'a Map<String, VariableKind>, key: &str) -> Option<&'a Node> {
+        match map.get(key) {
+            Some(VariableKind::Node(Some(Nodes::Node(node)))) => Some(node),
+            _ => None,
+        }
+    }
+
+    pub fn get_node<'a>(map: &'a Map<String, VariableKind>, key: &str) -> &'a Node {
+        match map.get(key) {
+            Some(n) => match n {
+                VariableKind::Node(Some(Nodes::Node(node))) => node,
+                _ => panic!("Node found with a different type {:#?}", n),
+            },
+            _ => panic!("Node not found"),
+        }
+    }
+
+    pub fn try_get_node_list<'a>(
+        map: &'a Map<String, VariableKind>,
+        key: &str,
+    ) -> Option<&'a Vec<Nodes>> {
+        match map.get(key) {
+            Some(VariableKind::NodeList(list)) => Some(list),
+            _ => None,
+        }
+    }
+
+    pub fn get_node_list<'a>(map: &'a Map<String, VariableKind>, key: &str) -> &'a Vec<Nodes> {
+        match map.get(key) {
+            Some(list) => match list {
+                VariableKind::NodeList(list) => list,
+                _ => panic!("Node list found with a different type {:#?}", list),
+            },
+            _ => panic!("Node list not found"),
+        }
+    }
+
+    pub fn try_get_boolean(map: &Map<String, VariableKind>, key: &str) -> Option<bool> {
+        match map.get(key) {
+            Some(VariableKind::Boolean(val)) => Some(*val),
+            _ => None,
+        }
+    }
+
+    pub fn get_boolean(map: &Map<String, VariableKind>, key: &str) -> bool {
+        match map.get(key) {
+            Some(val) => match val {
+                VariableKind::Boolean(val) => *val,
+                _ => panic!("Boolean found with a different type {:#?}", val),
+            },
+            _ => panic!("Boolean not found"),
+        }
+    }
+
+    pub fn try_get_number(map: &Map<String, VariableKind>, key: &str) -> Option<i32> {
+        match map.get(key) {
+            Some(VariableKind::Number(val)) => Some(*val),
+            _ => None,
+        }
+    }
+
+    pub fn get_number(map: &Map<String, VariableKind>, key: &str) -> i32 {
+        match map.get(key) {
+            Some(val) => match val {
+                VariableKind::Number(val) => *val,
+                _ => panic!("Number found with a different type {:#?}", val),
+            },
+            _ => panic!("Number not found"),
+        }
+    }
+
+}
+
 #[derive(Debug, Clone)]
 pub enum Nodes {
     Node(Node),
@@ -1489,6 +1565,20 @@ impl Nodes {
         match self {
             Nodes::Token(_) => true,
             _ => false,
+        }
+    }
+
+    pub fn unwrap_node(&self) -> &Node {
+        match self {
+            Nodes::Node(node) => node,
+            _ => panic!("unwrap_node called on {:#?}", self),
+        }
+    }
+
+    pub fn unwrap_token(&self) -> &Token {
+        match self {
+            Nodes::Token(token) => token,
+            _ => panic!("unwrap_token called on {:#?}", self),
         }
     }
 }
@@ -1570,6 +1660,64 @@ pub enum VariableKind {
     NodeList(Vec<Nodes>),
     Boolean(bool),
     Number(i32),
+}
+
+impl VariableKind {
+    pub fn is_node(&self) -> bool {
+        match self {
+            VariableKind::Node(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_node_list(&self) -> bool {
+        match self {
+            VariableKind::NodeList(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        match self {
+            VariableKind::Boolean(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_number(&self) -> bool {
+        match self {
+            VariableKind::Number(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn unwrap_node(&self) -> &Nodes {
+        match self {
+            VariableKind::Node(node) => node.as_ref().unwrap(),
+            _ => panic!("unwrap_node called on {:#?}", self),
+        }
+    }
+
+    pub fn unwrap_node_list(&self) -> &Vec<Nodes> {
+        match self {
+            VariableKind::NodeList(list) => list,
+            _ => panic!("unwrap_node_list called on {:#?}", self),
+        }
+    }
+
+    pub fn unwrap_boolean(&self) -> &bool {
+        match self {
+            VariableKind::Boolean(val) => val,
+            _ => panic!("unwrap_boolean called on {:#?}", self),
+        }
+    }
+
+    pub fn unwrap_number(&self) -> &i32 {
+        match self {
+            VariableKind::Number(val) => val,
+            _ => panic!("unwrap_number called on {:#?}", self),
+        }
+    }
 }
 
 #[derive(Clone)]

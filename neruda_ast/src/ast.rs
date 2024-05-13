@@ -1,4 +1,4 @@
-//! A module for generating Neruda AST after it is done parsing
+//! Helper functions for the AST
 use ruparse::{grammar::validator::TokenErrors, lexer::TokenKinds, parser::*};
 
 /// Returns all imports in tree 

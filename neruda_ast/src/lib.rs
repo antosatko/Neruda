@@ -1353,6 +1353,9 @@ pub fn gen_parser() -> Parser {
                 rules: vec![],
                 parameters: vec![Parameters::HardError(true)],
             },
+            Rule::Command {
+                command: Commands::Print { message: "Fakt je to tu".to_string() },
+            },
             Rule::Is {
                 token: MatchToken::Node("block".to_string()),
                 rules: vec![],
@@ -1420,36 +1423,19 @@ pub fn gen_parser() -> Parser {
                 rules: vec![],
                 parameters: vec![Parameters::HardError(true)],
             },
-            Rule::IsOneOf {
-                tokens: vec![
-                    OneOf {
-                        token: MatchToken::Token(TokenKinds::Text),
-                        rules: vec![Rule::While {
-                            token: MatchToken::Token(TokenKinds::Token(",".to_string())),
-                            rules: vec![Rule::Is {
-                                token: MatchToken::Enumerator("parameter_idents".to_string()),
-                                rules: vec![],
-                                parameters: vec![Parameters::Set("identifiers".to_string())],
-                            }],
-                            parameters: vec![],
-                        }],
+            Rule::Maybe {
+                token: MatchToken::Enumerator("parameter_idents".to_string()),
+                is: vec![Rule::While {
+                    token: MatchToken::Token(TokenKinds::Token(",".to_string())),
+                    rules: vec![Rule::Is {
+                        token: MatchToken::Enumerator("parameter_idents".to_string()),
+                        rules: vec![],
                         parameters: vec![Parameters::Set("identifiers".to_string())],
-                    },
-                    OneOf {
-                        token: MatchToken::Node("tuple_parameter".to_string()),
-                        rules: vec![Rule::While {
-                            token: MatchToken::Token(TokenKinds::Token(",".to_string())),
-                            rules: vec![Rule::Maybe {
-                                token: MatchToken::Node("tuple_parameter".to_string()),
-                                is: vec![],
-                                isnt: vec![],
-                                parameters: vec![Parameters::Set("identifiers".to_string())],
-                            }],
-                            parameters: vec![],
-                        }],
-                        parameters: vec![Parameters::Set("identifiers".to_string())],
-                    },
-                ],
+                    }],
+                    parameters: vec![Parameters::Set("identifiers".to_string())],
+                }],
+                isnt: vec![],
+                parameters: vec![Parameters::Set("identifiers".to_string())],
             },
             Rule::Is {
                 token: MatchToken::Token(TokenKinds::Token(")".to_string())),
@@ -3067,13 +3053,16 @@ pub enum A {
 }
 
 
-fun nevim(a: int = 1 + 6, b: int = (50 + ((6)))): int {
+fun nevim(a: int = 1 + 6, b: int = (50 + (dddddd) ) ): int {
     a + b().f.f.***([])[&i*i.**].{ž:():{!!&*(a);}};
 }
 
 
 fun nevim2(): int {
     nevim(b: 5, a: 5);
+
+
+    ():{};
 }
 
 

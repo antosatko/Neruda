@@ -2,6 +2,8 @@ use std::{default, ffi::OsStr, path::PathBuf};
 
 use ruparse::{lexer::PreprocessorError, parser::{ParseError, VariableKind}};
 use runtime::Context;
+use ruparse::parser::map_tools::*;
+
 
 mod dictionary;
 
@@ -195,10 +197,7 @@ impl Compiler {
         let tokens = parser.lexer.lex_utf8(&TEXT)?;
         let ast = parser.parse(&tokens, &TEXT)?;
     
-        let imports = match ast.globals.get("imports") {
-            Some(VariableKind::NodeList(imports)) => imports,
-            _ => unreachable!(),
-        };
+        let imports = get_node_list(&ast.globals, "imports");
         for node in imports {
             let string = neruda_ast::ast::read_string(node, &TEXT);
             println!("{}", string);
