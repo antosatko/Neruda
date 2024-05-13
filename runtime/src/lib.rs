@@ -36,6 +36,8 @@ impl Context {
                 functions: vec![],
                 classes: vec![],
                 closures: vec![],
+                arrays: vec![],
+                tuples: vec![],
             },
         }
     }
@@ -314,11 +316,80 @@ impl Context {
                     self.memory.stack.set_value(pos, value);
                     self.next_instr();
                 }
-                Instructions::AllocStatic(_, _) => todo!(),
-                Instructions::AllocDynamic(_, _) => todo!(),
-                Instructions::AllocKnown(_, _) => todo!(),
-                Instructions::Dealloc(_) => todo!(),
-                Instructions::Realloc(_, _) => todo!(),
+                Instructions::AllocStatic(size, pos) => {
+                    let obj = Object::new(ObjectKind {
+                        kind: ObjectKinds::Unknown,
+                        id: 0,
+                    }, size);
+                    let id = self.memory.heap.allocate(obj);
+                    self.memory.stack.set_value(pos, Value::ObjectPtr(id));
+                    self.next_instr();
+                }
+                Instructions::AllocDynamic(value, pos) => {
+                    let value = self.memory.stack.get_value(value);
+                    let size = match value {
+                        Value::Int(v) => v as u64,
+                        Value::Uint(v) => v,
+                        Value::Char(v) => v as u64,
+                        _ => {
+                            return ProgramReturn::Error(Errors::ExpectedGot(Value::Uint(0), value));
+                        }
+                    };
+                    let obj = Object::new(ObjectKind {
+                        kind: ObjectKinds::Unknown,
+                        id: 0,
+                    }, size);
+                    let id = self.memory.heap.allocate(obj);
+                    self.memory.stack.set_value(pos, Value::ObjectPtr(id));
+                    self.next_instr();
+                }
+                Instructions::AllocKnown(kind, pos) => {
+                    let size = self.module.get_size(&kind);
+                    let obj = Object::new(kind, size);
+                    let id = self.memory.heap.allocate(obj);
+                    self.memory.stack.set_value(pos, Value::ObjectPtr(id));
+                    self.next_instr();
+                }
+                Instructions::Dealloc(ptr) => {
+                    let ptr = self.memory.stack.get_value(ptr);
+                    match ptr {
+                        Value::ObjectPtr(id) => {
+                            self.memory.heap.deallocate(id);
+                        }
+                        Value::StringPtr(id) => {
+                            self.memory.strings.deallocate(id);
+                        }
+                        Value::UserdataPtr(_) => todo!(),
+                        _ => {
+                            return ProgramReturn::Error(Errors::InvalidPointerType(ptr));
+                        }
+                    }
+                    self.next_instr();
+                }
+                Instructions::Realloc(ptr, size) => {
+                    let (ptr, size) = self.memory.stack.get_2_values(ptr, size);
+                    let size = match size {
+                        Value::Int(v) => v as u64,
+                        Value::Uint(v) => v,
+                        Value::Char(v) => v as u64,
+                        _ => {
+                            return ProgramReturn::Error(Errors::ExpectedGot(Value::Uint(0), size));
+                        }
+                    };
+                    match ptr {
+                        Value::ObjectPtr(id) => {
+                            self.memory.heap.realloc(id, size);
+                        }
+                        Value::StringPtr(id) => {
+                            self.memory.strings.realloc(id, size);
+                        }
+                        Value::UserdataPtr(_) => todo!(),
+                        _ => {
+                            return ProgramReturn::Error(Errors::InvalidPointerType(ptr));
+                        }
+                    }
+                    self.next_instr();
+                }
                 Instructions::Reserve(function_id) => {
                     let fun = &self.module.functions[function_id as usize];
                     let end = self.memory.stack.data.len() as u64 + fun.stack_size;
@@ -478,6 +549,18 @@ pub struct Memory {
     pub strings: Strings,
 }
 
+/// Allocator trait has to be implemented by each memory region
+pub trait Allocator<T> {
+    fn allocate(&mut self, obj: T) -> u64;
+    fn deallocate(&mut self, index: u64);
+    fn shrink(&mut self, index: u64);
+    fn mark(&mut self, index: u64);
+    fn realloc(&mut self, index: u64, size: u64);
+    fn sweep(&mut self);
+    fn sweep_shrink(&mut self);
+    fn shrink_all(&mut self);
+}
+
 impl Memory {
     pub fn read_ptr(&self, ptr: Value) -> Result<Value, Errors> {
         match ptr {
@@ -604,10 +687,105 @@ pub struct Heap {
     pub freed: Vec<u64>,
 }
 
+impl Allocator<Object> for Heap {
+    /// Allocate a new object on the heap
+    fn allocate(&mut self, obj: Object) -> u64 {
+        match self.freed.pop() {
+            Some(id) => {
+                self.objects[id as usize] = obj;
+                id
+            }
+            None => {
+                self.objects.push(obj);
+                self.objects.len() as u64 - 1
+            }
+        }
+    }
+
+    /// Deallocate an object on the heap
+    fn deallocate(&mut self, index: u64) {
+        self.freed.push(index);
+        self.objects[index as usize].data.clear();
+        self.objects[index as usize].freed = true;
+    }
+
+    /// Shrink an object on the heap
+    ///
+    /// This is used to shrink the data of an object to the minimum size
+    /// which is useful for objects that have been deallocated and persisted
+    /// for reuse.
+    fn shrink(&mut self, index: u64) {
+        self.objects[index as usize].data.shrink_to_fit();
+    }
+
+    /// Mark an object on the heap
+    ///
+    /// This is used to mark an object for garbage collection
+    fn mark(&mut self, index: u64) {
+        if !self.marked.contains(&index) {
+            self.marked.push(index);
+        }
+    }
+
+    /// Reallocate an object on the heap
+    fn realloc(&mut self, index: u64, size: u64) {
+        self.objects[index as usize]
+            .data
+            .resize(size as usize, Value::Void);
+    }
+
+    /// Sweep the heap
+    fn sweep(&mut self) {
+        while let Some(index) = self.marked.pop() {
+            self.deallocate(index);
+        }
+    }
+
+    /// Sweep as well as shrink the heap
+    ///
+    /// This is less efficient than `sweep` but is useful for
+    /// reducing memory usage.
+    fn sweep_shrink(&mut self) {
+        while let Some(index) = self.marked.pop() {
+            self.deallocate(index);
+            self.shrink(index);
+        }
+    }
+
+    /// Shrinks the heap to the minimum size
+    ///
+    /// Use this after garbage collection to reduce memory usage
+    fn shrink_all(&mut self) {
+        if self.freed.is_empty() {
+            return;
+        }
+        // find first object that is not freed from the end
+        let mut max = 0;
+        for (i, obj) in self.objects.iter().enumerate().rev() {
+            if !obj.freed {
+                max = i + 1;
+                break;
+            }
+        }
+        self.objects.truncate(max);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Object {
     pub kind: ObjectKind,
     pub data: Vec<Value>,
+    pub freed: bool,
+}
+
+impl Object {
+    pub fn new(kind: ObjectKind, size: u64) -> Object {
+        Object {
+            kind,
+            data: vec![Value::Void; size as usize],
+            freed: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -650,6 +828,87 @@ pub struct Strings {
     pub freed: Vec<u64>,
 }
 
+impl Allocator<String> for Strings {
+    /// Allocate a new string on the heap
+    fn allocate(&mut self, obj: String) -> u64 {
+        match self.freed.pop() {
+            Some(id) => {
+                self.data[id as usize] = obj;
+                id
+            }
+            None => {
+                self.data.push(obj);
+                self.data.len() as u64 - 1
+            }
+        }
+    }
+
+    /// Deallocate a string on the heap
+    fn deallocate(&mut self, index: u64) {
+        self.freed.push(index);
+        self.data[index as usize].clear();
+    }
+
+    /// Shrink a string on the heap
+    ///
+    /// This is used to shrink the data of a string to the minimum size
+    /// which is useful for strings that have been deallocated and persisted
+    /// for reuse.
+    fn shrink(&mut self, index: u64) {
+        self.data[index as usize].shrink_to_fit();
+    }
+
+    /// Mark a string on the heap
+    ///
+    /// This is used to mark a string for garbage collection
+    fn mark(&mut self, index: u64) {
+        if !self.marked.contains(&index) {
+            self.marked.push(index);
+        }
+    }
+
+    /// Reallocate a string on the heap
+    fn realloc(&mut self, index: u64, size: u64) {
+        self.data[index as usize].reserve(size as usize);
+    }
+
+    /// Sweep the heap
+    fn sweep(&mut self) {
+        while let Some(index) = self.marked.pop() {
+            self.deallocate(index);
+        }
+    }
+
+    /// Sweep as well as shrink the heap
+    ///
+    /// This is less efficient than `sweep` but is useful for
+    /// reducing memory usage.
+    fn sweep_shrink(&mut self) {
+        while let Some(index) = self.marked.pop() {
+            self.deallocate(index);
+            self.shrink(index);
+        }
+    }
+
+    /// Shrinks the heap to the minimum size
+    ///
+    /// Use this after garbage collection to reduce memory usage
+    fn shrink_all(&mut self) {
+        if self.freed.is_empty() {
+            return;
+        }
+        // find first object that is not freed from the end
+        let mut max = 0;
+        for (i, _) in self.data.iter().enumerate().rev() {
+            if !self.freed.contains(&(i as u64)) {
+                max = i + 1;
+                break;
+            }
+        }
+        self.data.truncate(max);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Executor {
     pub instructions: Vec<Instructions>,
@@ -676,6 +935,7 @@ pub struct Class {
     /// class table.
     pub id: u64,
     pub name: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -689,11 +949,25 @@ pub struct Closure {
     pub stack_size: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Module {
     pub functions: Vec<Function>,
     pub classes: Vec<Class>,
     pub closures: Vec<Closure>,
+    pub arrays: Vec<u64>,
+    pub tuples: Vec<u64>,
+}
+
+impl Module {
+    pub fn get_size(&self, kind: &ObjectKind) -> u64 {
+        match kind.kind {
+            ObjectKinds::Class => self.classes[kind.id as usize].size,
+            ObjectKinds::Array => self.arrays[kind.id as usize],
+            ObjectKinds::Tuple => self.tuples[kind.id as usize],
+            ObjectKinds::Singleton => 1,
+            ObjectKinds::Unknown => 1,
+        }
+    }
 }
 
 /// Stack position
@@ -1006,8 +1280,7 @@ mod tests {
                 position: 0,
                 stack_size: 3,
             }],
-            classes: vec![],
-            closures: vec![],
+            ..Default::default()
         };
         let instrs = vec![
             Instructions::WriteConst(Value::Int(10), 0),
