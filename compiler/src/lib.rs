@@ -203,7 +203,7 @@ impl Compiler {
             println!("{}", string);
         }
     
-        let mut context = Context::new();
+        let mut context = Context::default();
     
         Ok(context)
     }
