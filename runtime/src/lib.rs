@@ -72,7 +72,7 @@ pub type InstrAddr = usize;
 /// any ID
 pub type ID = usize;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Instructions {
     /// Prints the value in stack[<addr>] in debug mode
     Debug { addr: StackAddr },
@@ -191,6 +191,24 @@ pub enum Instructions {
     CollectGarbage,
     /// GC call to mark garbage | faster | does not free memory | faster future allocations
     MarkGarbage,
+
+    /// Reads the value that pointer in stack[<ptr>] points to and stores it in stack[<to>]
+    ReadPtr { ptr: StackValue, to: StackAddr },
+    /// Writes the value in stack[<value>] to the pointer in stack[<ptr>]
+    WritePtr { ptr: StackValue, value: StackValue },
+    /// Poiter arithmetic, adds the value in stack[<offset>] to the pointer in stack[<ptr>] and stores the result in stack[<to>]
+    PtrAdd {
+        ptr: StackValue,
+        add_offset: StackValue,
+        to: StackAddr,
+    },
+
+    /// Calls the native library function with the <id> and stores the return value in stack[<addr>]
+    CallNative {
+        lib: ID,
+        function: ID,
+        addr: StackAddr,
+    },
 }
 
 pub mod module {
@@ -210,7 +228,7 @@ pub mod module {
         pub native_libs: Vec<NativeLib>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
     #[repr(C)]
     pub enum ModuleType {
         Function,
@@ -823,6 +841,7 @@ impl Context {
 }
 
 impl Thread {
+    /// Create a new thread that has the same context as the current thread
     pub fn copy_new(&self) -> Self {
         Self {
             memory: Memory::default(),
@@ -832,47 +851,63 @@ impl Thread {
         }
     }
 
-    pub fn run(&mut self) -> Value {
-        let mut stack_block = self.stack_frames.frames.last().unwrap().block;
+    /// Run the thread 
+    /// 
+    /// Entry point is ID of the function in the module that the thread will start from
+    pub fn run(&mut self, entry: usize) -> Value {
+        let mut stack_block = match self.stack_frames.frames.last() {
+            Some(frame) => frame.block,
+            None => self
+                .memory
+                .blocks
+                .allocate(Block::new(self.ctx.module.functions[entry].stack_size)),
+        };
+        self.instr_ptr = self.ctx.module.functions[entry].start;
+        self.stack_frames.push(StackFrame {
+            block: stack_block,
+            return_value: 0,
+            return_addr: 0,
+            function: entry,
+        });
         loop {
-            let instr = &self.ctx.instructions[self.instr_ptr];
+            let instr = self.ctx.instructions[self.instr_ptr];
             match instr {
                 Instructions::Debug { addr } => {
-                    let value = self.memory.get_value(stack_block, *addr);
+                    let value = self.memory.get_value(stack_block, addr);
                     println!("{:?}", value);
                     self.next_instr();
                 }
                 Instructions::End { exit_value } => {
-                    let value = self.memory.get_value(stack_block, *exit_value);
+                    let value = self.memory.get_value(stack_block, exit_value);
                     return value;
                 }
                 Instructions::Noop => self.next_instr(),
                 Instructions::Load { value, addr } => {
-                    self.memory.set_value(stack_block, *addr, *value);
+                    self.memory.set_value(stack_block, addr, value);
                     self.next_instr();
                 }
                 Instructions::LoadString { str, addr } => todo!(),
                 Instructions::Move { from, to } => {
-                    let value = self.memory.get_value(stack_block, *from);
-                    self.memory.set_value(stack_block, *to, value);
+                    let value = self.memory.get_value(stack_block, from);
+                    self.memory.set_value(stack_block, to, value);
                     self.next_instr();
                 }
                 Instructions::Swap { addr1, addr2 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
-                    self.memory.set_value(stack_block, *addr1, value2);
-                    self.memory.set_value(stack_block, *addr2, value1);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
+                    self.memory.set_value(stack_block, addr1, value2);
+                    self.memory.set_value(stack_block, addr2, value1);
                     self.next_instr();
                 }
                 Instructions::Goto { addr } => {
-                    self.instr_ptr = *addr;
+                    self.instr_ptr = addr;
                 }
                 Instructions::Branch { cond, addr, else_ } => {
-                    let value = self.memory.get_value(stack_block, *cond);
+                    let value = self.memory.get_value(stack_block, cond);
                     if let Value::Bool(true) = value {
-                        self.instr_ptr = *addr;
+                        self.instr_ptr = addr;
                     } else {
-                        self.instr_ptr = *else_;
+                        self.instr_ptr = else_;
                     }
                 }
                 Instructions::Add {
@@ -880,8 +915,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a + b),
@@ -891,7 +926,7 @@ impl Thread {
                         }
                         _ => panic!("Invalid types for addition"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Sub {
@@ -899,8 +934,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a - b),
@@ -910,7 +945,7 @@ impl Thread {
                         }
                         _ => panic!("Invalid types for subtraction"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Mul {
@@ -918,8 +953,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a * b),
@@ -929,7 +964,7 @@ impl Thread {
                         }
                         _ => panic!("Invalid types for multiplication"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Div {
@@ -937,8 +972,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a / b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a / b),
@@ -948,7 +983,7 @@ impl Thread {
                         }
                         _ => panic!("Invalid types for division"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Mod {
@@ -956,8 +991,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a % b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a % b),
@@ -967,7 +1002,7 @@ impl Thread {
                         }
                         _ => panic!("Invalid types for modulus"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Eq {
@@ -975,17 +1010,17 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a == b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a == b),
                         (Value::Float(a), Value::Float(b)) => Value::Bool(a == b),
                         (Value::Char(a), Value::Char(b)) => Value::Bool(a == b),
                         (Value::Bool(a), Value::Bool(b)) => Value::Bool(a == b),
-                        _ => panic!("Invalid types for equality"),
+                        _ => panic!("Invalid types for equality: {:?} {:?}", value1, value2),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Gt {
@@ -993,8 +1028,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a > b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a > b),
@@ -1002,7 +1037,7 @@ impl Thread {
                         (Value::Char(a), Value::Char(b)) => Value::Bool(a as u8 > b as u8),
                         _ => panic!("Invalid types for greater than"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Lt {
@@ -1010,8 +1045,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a < b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a < b),
@@ -1019,7 +1054,7 @@ impl Thread {
                         (Value::Char(a), Value::Char(b)) => Value::Bool((a as u8) < b as u8),
                         _ => panic!("Invalid types for less than"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Gteq {
@@ -1027,8 +1062,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a >= b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a >= b),
@@ -1036,7 +1071,7 @@ impl Thread {
                         (Value::Char(a), Value::Char(b)) => Value::Bool(a as u8 >= b as u8),
                         _ => panic!("Invalid types for greater than or equal"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Lteq {
@@ -1044,8 +1079,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
-                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value2 = self.memory.get_value(stack_block, addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a <= b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a <= b),
@@ -1053,16 +1088,16 @@ impl Thread {
                         (Value::Char(a), Value::Char(b)) => Value::Bool(a as u8 <= b as u8),
                         _ => panic!("Invalid types for less than or equal"),
                     };
-                    self.memory.set_value(stack_block, *addr3, result);
+                    self.memory.set_value(stack_block, addr3, result);
                     self.next_instr();
                 }
                 Instructions::Not { addr1, addr2 } => {
-                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value1 = self.memory.get_value(stack_block, addr1);
                     let result = match value1 {
                         Value::Bool(a) => Value::Bool(!a),
                         _ => panic!("Invalid type for negation"),
                     };
-                    self.memory.set_value(stack_block, *addr2, result);
+                    self.memory.set_value(stack_block, addr2, result);
                     self.next_instr();
                 }
                 Instructions::Open { function, addr } => {
@@ -1070,17 +1105,17 @@ impl Thread {
                         block: self
                             .memory
                             .blocks
-                            .allocate(Block::new(self.ctx.module.functions[*function].stack_size)),
-                        return_value: *addr,
+                            .allocate(Block::new(self.ctx.module.functions[function].stack_size)),
+                        return_value: addr,
                         return_addr: self.instr_ptr + 1,
-                        function: *function,
+                        function: function,
                     };
                     self.stack_frames.next = frame;
                 }
                 Instructions::Arg { addr, to } => {
-                    let value = self.memory.get_value(stack_block, *addr);
+                    let value = self.memory.get_value(stack_block, addr);
                     self.memory
-                        .set_value(self.stack_frames.next.block, *to, value);
+                        .set_value(self.stack_frames.next.block, to, value);
                     self.next_instr();
                 }
                 Instructions::Jump => {
@@ -1091,47 +1126,51 @@ impl Thread {
                 }
                 Instructions::Return { addr } => {
                     self.memory.blocks.deallocate(stack_block);
-                    let value = self.memory.get_value(stack_block, *addr);
+                    let value = self.memory.get_value(stack_block, addr);
                     let current_frame = self.stack_frames.pop().unwrap();
-                    let prev_block = self.stack_frames.frames.last().unwrap().block;
+                    let prev_block = match self.stack_frames.frames.last() {
+                        Some(frame) => frame.block,
+                        None => return value,
+                    
+                    };
                     self.memory
                         .set_value(prev_block, current_frame.return_value, value);
                     self.instr_ptr = current_frame.return_addr;
                     stack_block = prev_block;
                 }
                 Instructions::AllocStatic { size, addr } => {
-                    let block = Block::new(*size);
+                    let block = Block::new(size);
                     let block_index = self.memory.blocks.allocate(block);
                     self.memory
-                        .set_value(stack_block, *addr, Value::Block { block: block_index });
+                        .set_value(stack_block, addr, Value::Block { block: block_index });
                     self.next_instr();
                 }
                 Instructions::AllocDynamic { size, addr } => {
-                    let size = self.memory.get_value(stack_block, *size);
+                    let size = self.memory.get_value(stack_block, size);
                     let block = Block::new(match size {
                         Value::Int(size) => size as usize,
                         _ => panic!("Invalid size for dynamic allocation"),
                     });
                     let block_index = self.memory.blocks.allocate(block);
                     self.memory
-                        .set_value(stack_block, *addr, Value::Block { block: block_index });
+                        .set_value(stack_block, addr, Value::Block { block: block_index });
                     self.next_instr();
                 }
                 Instructions::AllocId { id, kind, addr } => {
                     let size = match kind {
                         ModuleType::Array => 1, // arrays are always 1 todo: might change in the future
-                        ModuleType::Tuple => self.ctx.module.tuples[*id].types.len(),
-                        ModuleType::Class => self.ctx.module.classes[*id].fields.len(),
+                        ModuleType::Tuple => self.ctx.module.tuples[id].types.len(),
+                        ModuleType::Class => self.ctx.module.classes[id].fields.len(),
                         _ => panic!("Invalid module type for allocation"),
                     };
                     let block = Block::new(size);
                     let block_index = self.memory.blocks.allocate(block);
                     self.memory
-                        .set_value(stack_block, *addr, Value::Block { block: block_index });
+                        .set_value(stack_block, addr, Value::Block { block: block_index });
                     self.next_instr();
                 }
                 Instructions::Dealloc { addr } => {
-                    let block = match self.memory.get_value(stack_block, *addr) {
+                    let block = match self.memory.get_value(stack_block, addr) {
                         Value::Block { block } => block,
                         _ => panic!("Invalid value for deallocation"),
                     };
@@ -1139,11 +1178,11 @@ impl Thread {
                     self.next_instr();
                 }
                 Instructions::Realloc { addr, size } => {
-                    let block = match self.memory.get_value(stack_block, *addr) {
+                    let block = match self.memory.get_value(stack_block, addr) {
                         Value::Block { block } => block,
                         _ => panic!("Invalid value for reallocation"),
                     };
-                    let size = match self.memory.get_value(stack_block, *size) {
+                    let size = match self.memory.get_value(stack_block, size) {
                         Value::Int(size) => size as usize,
                         _ => panic!("Invalid size for reallocation"),
                     };
@@ -1156,6 +1195,85 @@ impl Thread {
                 }
                 Instructions::MarkGarbage => {
                     self.memory.mark_garbage(&self.stack_frames);
+                    self.next_instr();
+                }
+                Instructions::ReadPtr { ptr, to } => {
+                    let ptr = self.memory.get_value(stack_block, ptr);
+                    let value = match ptr {
+                        Value::Pointer { block, offset } => self.memory.get_value(block, offset),
+                        Value::CharPtr { str, offset } => {
+                            let string = self.memory.get_string(str);
+                            Value::Char(string.chars().nth(offset).unwrap())
+                        }
+                        _ => panic!("Invalid value for reading pointer"),
+                    };
+                    self.memory.set_value(stack_block, to, value);
+                    self.next_instr();
+                }
+                Instructions::WritePtr { ptr, value } => {
+                    let value = self.memory.get_value(stack_block, value);
+                    let ptr = self.memory.get_value(stack_block, ptr);
+                    match ptr {
+                        Value::Pointer { block, offset } => {
+                            self.memory.set_value(block, offset, value);
+                        }
+                        _ => panic!("Invalid value for writing pointer"),
+                    }
+                    self.next_instr();
+                }
+                Instructions::PtrAdd {
+                    ptr,
+                    add_offset,
+                    to,
+                } => {
+                    let ptr = self.memory.get_value(stack_block, ptr);
+                    let add_offset = match self.memory.get_value(stack_block, add_offset) {
+                        Value::Int(offset) => offset as usize,
+                        Value::Uint(offset) => offset as usize,
+                        _ => panic!("Invalid value for adding offset"),
+                    };
+                    let new_ptr = match ptr {
+                        Value::Pointer { block, offset } => {
+                            let new_offset = offset + add_offset;
+                            Value::Pointer {
+                                block,
+                                offset: new_offset,
+                            }
+                        }
+                        Value::CharPtr { str, offset } => {
+                            let new_offset = offset + add_offset;
+                            Value::CharPtr {
+                                str,
+                                offset: new_offset,
+                            }
+                        }
+                        Value::String { str } => {
+                            let new_offset = add_offset;
+                            Value::CharPtr {
+                                str,
+                                offset: new_offset,
+                            }
+                        }
+                        Value::Block { block } => {
+                            let new_offset = add_offset;
+                            Value::Pointer {
+                                block,
+                                offset: new_offset,
+                            }
+                        }
+                        _ => panic!("Invalid value for adding offset"),
+                    };
+                    self.memory.set_value(stack_block, to, new_ptr);
+                    self.next_instr();
+                }
+                Instructions::CallNative {
+                    lib,
+                    function,
+                    addr,
+                } => {
+                    let lib = self.ctx.module.native_libs[lib];
+                    let value = lib(self, function).unwrap();
+                    self.memory.set_value(stack_block, addr, value);
                     self.next_instr();
                 }
             }
@@ -1172,6 +1290,8 @@ impl Thread {
 mod test {
     use core::panic;
     use std::io::Write;
+
+    use crate::api::NativeLibErr;
 
     use super::*;
 
@@ -1202,7 +1322,6 @@ mod test {
             Instructions::Debug { addr: 2 },
             Instructions::End { exit_value: 2 },
         ];
-        context.entry_instruction = 0;
         context.module.functions.push(Function {
             name: "main".to_string(),
             stack_size: 3,
@@ -1225,18 +1344,7 @@ mod test {
             },
         });
         let mut thread = context.create_thread();
-        thread.memory.blocks.blocks.push(Block {
-            data: vec![Value::Int(0), Value::Int(0), Value::Int(0)],
-            free: false,
-            protect: false,
-        });
-        thread.stack_frames.frames.push(StackFrame {
-            block: 0,
-            return_value: 0,
-            return_addr: 0,
-            function: 0,
-        });
-        let value = thread.run();
+        let value = thread.run(0);
 
         assert_eq!(value, Value::Int(15));
 
@@ -1317,7 +1425,6 @@ mod test {
             // 9
             Instructions::End { exit_value: N },
         ];
-        context.entry_instruction = 0;
         context.module.functions.push(Function {
             name: "main".to_string(),
             stack_size: 4,
@@ -1332,7 +1439,7 @@ mod test {
                 },
             },
             start: 0,
-            end: 7,
+            end: 9,
             line: Line {
                 line: 0,
                 column: 0,
@@ -1351,24 +1458,63 @@ mod test {
         writer.write_all(serialized.as_bytes()).unwrap();
 
         let mut thread = context.create_thread();
-        thread.memory.blocks.blocks.push(Block {
-            data: vec![Value::Int(0), Value::Int(0), Value::Int(0), Value::Int(0)],
-            free: false,
-            protect: false,
-        });
-        thread.stack_frames.frames.push(StackFrame {
-            block: 0,
-            return_value: 0,
-            return_addr: 0,
-            function: 0,
-        });
 
         let start = std::time::Instant::now();
-        let value = thread.run();
+        let value = thread.run(0);
         let elapsed = start.elapsed();
         println!("Elapsed: {:?}", elapsed);
 
         assert_eq!(value, Value::Int(ITERATIONS));
+
+        panic!("Just testing the output, everything is fine!")
+    }
+
+    #[test]
+    fn native() {
+        fn lib(th: &mut Thread, id: usize) -> Result<Value, NativeLibErr> {
+            match id {
+                0 => Ok(Value::Int(5)),
+                _ => Err(NativeLibErr::NotFound),
+            }
+        }
+
+        let mut context = Context::default();
+        context.module.native_libs.push(lib);
+        context.instructions = vec![
+            Instructions::CallNative {
+                lib: 0,
+                function: 0,
+                addr: 0,
+            },
+            Instructions::Debug { addr: 0 },
+            Instructions::Return { addr: 0 },
+        ];
+        context.module.functions.push(Function {
+            name: "main".to_string(),
+            stack_size: 1,
+            args: vec![],
+            ret: Type {
+                kind: Types::Word("int".to_string()),
+                refs: 0,
+                line: Line {
+                    line: 0,
+                    column: 0,
+                    file: "".to_string(),
+                },
+            },
+            start: 0,
+            end: 2,
+            line: Line {
+                line: 0,
+                column: 0,
+                file: "".to_string(),
+            },
+        });
+
+        let mut thread = context.create_thread();
+        let value = thread.run(0);
+
+        assert_eq!(value, Value::Int(5));
 
         panic!("Just testing the output, everything is fine!")
     }
