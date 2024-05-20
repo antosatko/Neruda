@@ -1,14 +1,13 @@
 use memory::*;
 use module::*;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Hold necessary data for starting the main thread
 ///
 /// After the main thread is created, this struct will be consumed
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Context {
-    /// default memory for the thread
-    pub memory: Memory,
     /// instructions for the thread
     pub instructions: Vec<Instructions>,
     /// entry point for the main thread
@@ -42,8 +41,8 @@ impl StackFrames {
                 block: 0,
                 return_value: 0,
                 return_addr: 0,
-                function: 0
-            }
+                function: 0,
+            },
         }
     }
 
@@ -73,7 +72,7 @@ pub type InstrAddr = usize;
 /// any ID
 pub type ID = usize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instructions {
     /// Prints the value in stack[<addr>] in debug mode
     Debug { addr: StackAddr },
@@ -94,29 +93,73 @@ pub enum Instructions {
     /// Goes to the instruction at <addr>
     Goto { addr: InstrAddr },
     /// Goes to the instruction at <addr> if the value in stack[<cond>] is true else goes to the instruction at <else_>
-    Branch { cond: StackAddr, addr: InstrAddr, else_: InstrAddr },
+    Branch {
+        cond: StackAddr,
+        addr: InstrAddr,
+        else_: InstrAddr,
+    },
 
     /// Adds the values in stack[<addr1>] and stack[<addr2>] and stores the result in stack[<addr3>]
-    Add { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Add {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Subtracts the value in stack[<addr2>] from the value in stack[<addr1>] and stores the result in stack[<addr3>]
-    Sub { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Sub {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Multiplies the values in stack[<addr1>] and stack[<addr2>] and stores the result in stack[<addr3>]
-    Mul { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Mul {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Divides the value in stack[<addr1>] by the value in stack[<addr2>] and stores the result in stack[<addr3>]
-    Div { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Div {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Modulus of the value in stack[<addr1>] by the value in stack[<addr2>] and stores the result in stack[<addr3>]
-    Mod { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Mod {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
 
     /// Compares for stack[<addr1>] equal to stack[<addr2>] and stores the result in stack[<addr3>]
-    Eq { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Eq {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Compares for stack[<addr1>] greater than stack[<addr2>] and stores the result in stack[<addr3>]
-    Gt { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Gt {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Compares for stack[<addr1>] less than stack[<addr2>] and stores the result in stack[<addr3>]
-    Lt { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Lt {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Compares for stack[<addr1>] greater than or equal to stack[<addr2>] and stores the result in stack[<addr3>]
-    Gteq { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Gteq {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Compares for stack[<addr1>] less than or equal to stack[<addr2>] and stores the result in stack[<addr3>]
-    Lteq { addr1: StackAddr, addr2: StackAddr, addr3: StackAddr },
+    Lteq {
+        addr1: StackAddr,
+        addr2: StackAddr,
+        addr3: StackAddr,
+    },
     /// Negates the value in stack[<addr1>] and stores the result in stack[<addr2>]
     Not { addr1: StackAddr, addr2: StackAddr },
 
@@ -129,13 +172,33 @@ pub enum Instructions {
     /// Closes the current stack frame, copies the value in stack[<addr>] to the return value of the previous stack frame, and goes to the return address
     Return { addr: StackAddr },
 
+    /// Allocates a new block of memory with the <size> and stores the pointer in stack[<addr>]
+    AllocStatic { size: usize, addr: StackAddr },
+    /// Allocates a new block of memory with the size in stack[<size>] and stores the pointer in stack[<addr>]
+    AllocDynamic { size: StackAddr, addr: StackAddr },
+    /// Allocates a new block of memory with the size in module.<kind>[<ID>].size and stores the pointer in stack[<addr>]
+    AllocId {
+        id: ID,
+        kind: ModuleType,
+        addr: StackAddr,
+    },
+    /// Deallocates the block of memory in stack[<addr>]
+    Dealloc { addr: StackAddr },
+    /// Reallocates the block of memory in stack[<addr>] with the new size in stack[<size>]
+    Realloc { addr: StackAddr, size: StackAddr },
+
+    /// GC call to collect garbage | slower | frees memory | slower future allocations
+    CollectGarbage,
+    /// GC call to mark garbage | faster | does not free memory | faster future allocations
+    MarkGarbage,
 }
 
 pub mod module {
     use crate::api::NativeLib;
+    use serde::{Deserialize, Serialize};
 
     /// Module contains definitions for functions, classes, closures, arrays, tuples, and strings
-    #[derive(Debug, Clone, Default)]
+    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
     pub struct Module {
         pub functions: Vec<Function>,
         pub classes: Vec<Class>,
@@ -143,17 +206,29 @@ pub mod module {
         pub arrays: Vec<Array>,
         pub tuples: Vec<Tuple>,
         pub strings: Vec<String>,
+        #[serde(skip)]
         pub native_libs: Vec<NativeLib>,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[repr(C)]
+    pub enum ModuleType {
+        Function,
+        Class,
+        Closure,
+        Array,
+        Tuple,
+        String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Line {
         pub line: usize,
         pub column: usize,
         pub file: String,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Type {
         pub kind: Types,
         pub refs: u64,
@@ -169,7 +244,7 @@ pub mod module {
         }
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub enum Types {
         Word(String),
         Array(Box<Type>),
@@ -207,9 +282,10 @@ pub mod module {
     }
 
     /// Function definition
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Function {
         pub name: String,
+        pub stack_size: usize,
         pub args: Vec<(String, Type)>,
         pub ret: Type,
         /// The index of the first instruction in the function
@@ -220,7 +296,7 @@ pub mod module {
     }
 
     /// Class definition
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Class {
         pub name: String,
         pub fields: Vec<(String, Type)>,
@@ -229,7 +305,7 @@ pub mod module {
     }
 
     /// Closure definition
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Closure {
         pub name: String,
         pub args: Vec<(String, Type)>,
@@ -239,14 +315,14 @@ pub mod module {
     }
 
     /// Array definition
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Array {
         pub type_: Type,
         pub line: Line,
     }
 
     /// Tuple definition
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Tuple {
         pub types: Vec<Type>,
         pub line: Line,
@@ -254,7 +330,11 @@ pub mod module {
 }
 
 pub mod memory {
-    #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+    use serde::{Deserialize, Serialize};
+
+    use crate::StackFrames;
+
+    #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
     pub enum Value {
         Int(i64),
         Uint(u64),
@@ -269,6 +349,9 @@ pub mod memory {
         String { str: usize },
         CharPtr { str: usize, offset: usize },
         Userdata { data: usize },
+
+        Closure { instr_ptr: usize, block: usize },
+        Function { instr_ptr: usize },
 
         Void,
     }
@@ -309,6 +392,84 @@ pub mod memory {
         pub free: Vec<usize>,
     }
 
+    impl Allocator<Block> for Blocks {
+        fn allocate(&mut self, obj: Block) -> usize {
+            match self.free.pop() {
+                Some((index, _)) => {
+                    self.blocks[index] = obj;
+                    index
+                }
+                None => {
+                    self.blocks.push(obj);
+                    self.blocks.len() - 1
+                }
+            }
+        }
+
+        fn deallocate(&mut self, index: usize) {
+            let block = &mut self.blocks[index];
+            if block.protect {
+                return;
+            }
+            block.free = true;
+            self.free.push((index, block.data.len()));
+        }
+
+        fn realloc(&mut self, index: usize, size: usize) {
+            self.blocks[index].data.resize(size, Value::Null);
+        }
+    }
+
+    impl Allocator<StringObject> for Strings {
+        fn allocate(&mut self, obj: StringObject) -> usize {
+            match self.free.pop() {
+                Some(index) => {
+                    self.data[index] = obj;
+                    index
+                }
+                None => {
+                    self.data.push(obj);
+                    self.data.len() - 1
+                }
+            }
+        }
+
+        fn deallocate(&mut self, index: usize) {
+            self.data[index].free = true;
+            self.free.push(index);
+        }
+
+        fn realloc(&mut self, _index: usize, _size: usize) {
+            return;
+        }
+    }
+
+    impl Allocator<UDContainer> for UDHeap {
+        fn allocate(&mut self, obj: UDContainer) -> usize {
+            match self.free.pop() {
+                Some(index) => {
+                    self.data[index] = obj;
+                    index
+                }
+                None => {
+                    self.data.push(obj);
+                    self.data.len() - 1
+                }
+            }
+        }
+
+        fn deallocate(&mut self, index: usize) {
+            let ud = &mut self.data[index];
+            ud.free = true;
+            self.free.push(index);
+            ud.data.collect();
+        }
+
+        fn realloc(&mut self, _index: usize, _size: usize) {
+            return;
+        }
+    }
+
     /// A block of memory
     #[derive(Debug, Clone)]
     pub struct Block {
@@ -316,8 +477,12 @@ pub mod memory {
         pub data: Vec<Value>,
         /// Block that is free to use
         pub free: bool,
-        /// Reference count
-        pub count: u64,
+        /// Protected blocks can not be deallocated manually
+        ///
+        /// Only the garbage collector can deallocate protected blocks
+        ///
+        /// This is useful for blocks that are captured by closures
+        pub protect: bool,
     }
 
     #[derive(Debug, Clone)]
@@ -399,6 +564,7 @@ pub mod memory {
     }
 
     /// Explains to the garbage collector how to handle the data
+    #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
     pub enum GCMethod {
         /// The data is not garbage collected
         None,
@@ -407,42 +573,210 @@ pub mod memory {
         /// The data is garbage collected and the garbage collector will call the `collect` method
         Prepare,
     }
-    
+
     impl Memory {
+        #[inline]
         pub fn get_value(&self, stack_block: usize, addr: usize) -> Value {
             self.blocks.blocks[stack_block].data[addr]
         }
-    
+
+        #[inline]
         pub fn set_value(&mut self, stack_block: usize, addr: usize, value: Value) {
             self.blocks.blocks[stack_block].data[addr] = value;
         }
+
+        #[inline]
+        pub fn get_string(&self, addr: usize) -> String {
+            self.strings.data[addr].data.clone()
         }
+
+        #[inline]
+        pub fn set_string(&mut self, addr: usize, value: String) {
+            self.strings.data[addr].data = value;
+        }
+
+        fn mark_all(&mut self) {
+            for block in &mut self.blocks.blocks {
+                block.free = true;
+            }
+            for string in &mut self.strings.data {
+                string.free = true;
+            }
+            for ud in &mut self.userdata.data {
+                ud.free = true;
+            }
+        }
+
+        fn mark_used_block(&mut self, block: usize) {
+            self.blocks.blocks[block].free = false;
+
+            let mut i = 0;
+            while let Some(value) = self.blocks.blocks[block].data.get(i) {
+                match value {
+                    Value::Block { block } => {
+                        self.mark_used_block(*block);
+                    }
+                    Value::Pointer { block, .. } => {
+                        self.mark_used_block(*block);
+                    }
+                    Value::String { str } => {
+                        self.strings.data[*str].free = false;
+                    }
+                    Value::CharPtr { str, .. } => {
+                        self.strings.data[*str].free = false;
+                    }
+                    Value::Userdata { data } => {
+                        self.userdata.data[*data].free = false;
+                    }
+                    Value::Closure { block, .. } => {
+                        self.mark_used_block(*block);
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+
+        fn mark(&mut self, stack_frames: &StackFrames) {
+            self.mark_all();
+
+            for frame in &stack_frames.frames {
+                self.mark_used_block(frame.block);
+            }
+        }
+
+        fn sweep(&mut self) {
+            self.blocks.free.clear();
+            self.blocks.free.reserve(self.blocks.blocks.len());
+            self.strings.free.clear();
+            self.strings.free.reserve(self.strings.data.len());
+            self.userdata.free.clear();
+            self.userdata.free.reserve(self.userdata.data.len());
+
+            for (index, block) in self.blocks.blocks.iter_mut().enumerate() {
+                if block.free {
+                    self.blocks.free.push((index, block.data.len()));
+                }
+            }
+            for (index, string) in self.strings.data.iter_mut().enumerate() {
+                if string.free {
+                    self.strings.free.push(index);
+                }
+            }
+            for (index, ud) in self.userdata.data.iter_mut().enumerate() {
+                if ud.free {
+                    match ud.data.gc_method() {
+                        GCMethod::GC => {
+                            self.userdata.free.push(index);
+                        }
+                        GCMethod::Prepare => {
+                            ud.data.collect();
+                            self.userdata.free.push(index);
+                        }
+                        GCMethod::None => {}
+                    }
+                }
+            }
+        }
+
+        fn shrink(&mut self) {
+            let mut max = 0;
+            for (index, block) in self.blocks.blocks.iter().enumerate().rev() {
+                if !block.free {
+                    max = index;
+                    break;
+                }
+            }
+            self.blocks.blocks.truncate(max + 1);
+            let mut max = 0;
+            for (index, string) in self.strings.data.iter().enumerate().rev() {
+                if !string.free {
+                    max = index;
+                    break;
+                }
+            }
+            self.strings.data.truncate(max + 1);
+            let mut max = 0;
+            for (index, ud) in self.userdata.data.iter().enumerate().rev() {
+                if !ud.free {
+                    max = index;
+                    break;
+                }
+            }
+            self.userdata.data.truncate(max + 1);
+
+            self.sweep()
+        }
+
+        /// Collect garbage
+        ///
+        /// Free all excess memory
+        ///
+        /// This is more expensive than `mark_garbage`, use this only when you need to free memory
+        /// or when performance is not an issue
+        ///
+        /// Freeing memory also means that future allocations might run out of preallocated memory
+        /// and will need to allocate more memory resulting in slighly slower performance
+        pub fn collect_garbage(&mut self, stack_frames: &StackFrames) {
+            self.mark(stack_frames);
+            self.sweep();
+            self.shrink();
+        }
+
+        /// Mark garbage
+        ///
+        /// This will only mark the garbage, it will not free the memory
+        /// but the memory will be available for reuse
+        ///
+        /// This is faster than `collect_garbage`, use this when performance is an issue
+        pub fn mark_garbage(&mut self, stack_frames: &StackFrames) {
+            self.mark(stack_frames);
+            self.sweep();
+        }
+    }
+
+    impl Block {
+        pub fn new(size: usize) -> Self {
+            Self {
+                data: vec![Value::Null; size],
+                free: false,
+                protect: false,
+            }
+        }
+
+        pub fn protected(size: usize) -> Self {
+            Self {
+                data: vec![Value::Null; size],
+                free: false,
+                protect: true,
+            }
+        }
+    }
 }
 
 pub mod api {
     use super::memory::Value;
     use crate::Thread;
 
-
     /// Native library function
-    /// 
+    ///
     /// This function will be called when a thread calls a native library function
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// - `th` - The thread that called the function
     /// - `id` - The id of the function that was called
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// The return value of the function
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// If the function does not exist, return `NativeLibErr::NotFound`
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This function should never panic. If an error occurs, return `NativeLibErr::Error`
     /// adn let the runtime handle the error
     pub type NativeLib = fn(th: &mut Thread, id: usize) -> Result<Value, NativeLibErr>;
@@ -459,16 +793,16 @@ pub mod api {
     }
 
     /// Initialize the native library
-    /// 
+    ///
     /// This function will be called when the library is loaded
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// //! Library that always returns 5
     /// use runtime::api::NativeLib;
     /// use runtime::memory::Value;
-    /// 
+    ///
     /// #[no_mangle]
     /// pub fn init() -> NativeLib {
     ///    |_, _| Ok(Value::Int(5))
@@ -541,72 +875,106 @@ impl Thread {
                         self.instr_ptr = *else_;
                     }
                 }
-                Instructions::Add { addr1, addr2, addr3 } => {
+                Instructions::Add {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a + b),
                         (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-                        (Value::Char(a), Value::Char(b)) => Value::Char((a as u8 + b as u8) as char),
+                        (Value::Char(a), Value::Char(b)) => {
+                            Value::Char((a as u8 + b as u8) as char)
+                        }
                         _ => panic!("Invalid types for addition"),
                     };
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Sub { addr1, addr2, addr3 } => {
+                Instructions::Sub {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a - b),
                         (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-                        (Value::Char(a), Value::Char(b)) => Value::Char((a as u8 - b as u8) as char),
+                        (Value::Char(a), Value::Char(b)) => {
+                            Value::Char((a as u8 - b as u8) as char)
+                        }
                         _ => panic!("Invalid types for subtraction"),
                     };
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Mul { addr1, addr2, addr3 } => {
+                Instructions::Mul {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a * b),
                         (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-                        (Value::Char(a), Value::Char(b)) => Value::Char((a as u8 * b as u8) as char),
+                        (Value::Char(a), Value::Char(b)) => {
+                            Value::Char((a as u8 * b as u8) as char)
+                        }
                         _ => panic!("Invalid types for multiplication"),
                     };
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Div { addr1, addr2, addr3 } => {
+                Instructions::Div {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a / b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a / b),
                         (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-                        (Value::Char(a), Value::Char(b)) => Value::Char((a as u8 / b as u8) as char),
+                        (Value::Char(a), Value::Char(b)) => {
+                            Value::Char((a as u8 / b as u8) as char)
+                        }
                         _ => panic!("Invalid types for division"),
                     };
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Mod { addr1, addr2, addr3 } => {
+                Instructions::Mod {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a % b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a % b),
                         (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
-                        (Value::Char(a), Value::Char(b)) => Value::Char((a as u8 % b as u8) as char),
+                        (Value::Char(a), Value::Char(b)) => {
+                            Value::Char((a as u8 % b as u8) as char)
+                        }
                         _ => panic!("Invalid types for modulus"),
                     };
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Eq { addr1, addr2, addr3 } => {
+                Instructions::Eq {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
@@ -620,7 +988,11 @@ impl Thread {
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Gt { addr1, addr2, addr3 } => {
+                Instructions::Gt {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
@@ -633,7 +1005,11 @@ impl Thread {
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Lt { addr1, addr2, addr3 } => {
+                Instructions::Lt {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
@@ -646,7 +1022,11 @@ impl Thread {
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Gteq { addr1, addr2, addr3 } => {
+                Instructions::Gteq {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
@@ -659,7 +1039,11 @@ impl Thread {
                     self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
-                Instructions::Lteq { addr1, addr2, addr3 } => {
+                Instructions::Lteq {
+                    addr1,
+                    addr2,
+                    addr3,
+                } => {
                     let value1 = self.memory.get_value(stack_block, *addr1);
                     let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
@@ -683,7 +1067,10 @@ impl Thread {
                 }
                 Instructions::Open { function, addr } => {
                     let frame = StackFrame {
-                        block: todo!("allocate new block"),
+                        block: self
+                            .memory
+                            .blocks
+                            .allocate(Block::new(self.ctx.module.functions[*function].stack_size)),
                         return_value: *addr,
                         return_addr: self.instr_ptr + 1,
                         function: *function,
@@ -692,26 +1079,90 @@ impl Thread {
                 }
                 Instructions::Arg { addr, to } => {
                     let value = self.memory.get_value(stack_block, *addr);
-                    self.memory.set_value(self.stack_frames.next.block, *to, value);
+                    self.memory
+                        .set_value(self.stack_frames.next.block, *to, value);
                     self.next_instr();
                 }
                 Instructions::Jump => {
-                    self.instr_ptr = self.ctx.module.functions[self.stack_frames.next.function].start;
+                    self.instr_ptr =
+                        self.ctx.module.functions[self.stack_frames.next.function].start;
                     stack_block = self.stack_frames.next.block;
                     self.stack_frames.push(self.stack_frames.next.clone());
                 }
                 Instructions::Return { addr } => {
+                    self.memory.blocks.deallocate(stack_block);
                     let value = self.memory.get_value(stack_block, *addr);
-                    let frame = self.stack_frames.pop().unwrap();
+                    let current_frame = self.stack_frames.pop().unwrap();
                     let prev_block = self.stack_frames.frames.last().unwrap().block;
-                    self.memory.set_value(prev_block, frame.return_value, value);
-                    self.instr_ptr = frame.return_addr;
+                    self.memory
+                        .set_value(prev_block, current_frame.return_value, value);
+                    self.instr_ptr = current_frame.return_addr;
                     stack_block = prev_block;
+                }
+                Instructions::AllocStatic { size, addr } => {
+                    let block = Block::new(*size);
+                    let block_index = self.memory.blocks.allocate(block);
+                    self.memory
+                        .set_value(stack_block, *addr, Value::Block { block: block_index });
+                    self.next_instr();
+                }
+                Instructions::AllocDynamic { size, addr } => {
+                    let size = self.memory.get_value(stack_block, *size);
+                    let block = Block::new(match size {
+                        Value::Int(size) => size as usize,
+                        _ => panic!("Invalid size for dynamic allocation"),
+                    });
+                    let block_index = self.memory.blocks.allocate(block);
+                    self.memory
+                        .set_value(stack_block, *addr, Value::Block { block: block_index });
+                    self.next_instr();
+                }
+                Instructions::AllocId { id, kind, addr } => {
+                    let size = match kind {
+                        ModuleType::Array => 1, // arrays are always 1 todo: might change in the future
+                        ModuleType::Tuple => self.ctx.module.tuples[*id].types.len(),
+                        ModuleType::Class => self.ctx.module.classes[*id].fields.len(),
+                        _ => panic!("Invalid module type for allocation"),
+                    };
+                    let block = Block::new(size);
+                    let block_index = self.memory.blocks.allocate(block);
+                    self.memory
+                        .set_value(stack_block, *addr, Value::Block { block: block_index });
+                    self.next_instr();
+                }
+                Instructions::Dealloc { addr } => {
+                    let block = match self.memory.get_value(stack_block, *addr) {
+                        Value::Block { block } => block,
+                        _ => panic!("Invalid value for deallocation"),
+                    };
+                    self.memory.blocks.deallocate(block);
+                    self.next_instr();
+                }
+                Instructions::Realloc { addr, size } => {
+                    let block = match self.memory.get_value(stack_block, *addr) {
+                        Value::Block { block } => block,
+                        _ => panic!("Invalid value for reallocation"),
+                    };
+                    let size = match self.memory.get_value(stack_block, *size) {
+                        Value::Int(size) => size as usize,
+                        _ => panic!("Invalid size for reallocation"),
+                    };
+                    self.memory.blocks.realloc(block, size);
+                    self.next_instr();
+                }
+                Instructions::CollectGarbage => {
+                    self.memory.collect_garbage(&self.stack_frames);
+                    self.next_instr();
+                }
+                Instructions::MarkGarbage => {
+                    self.memory.mark_garbage(&self.stack_frames);
+                    self.next_instr();
                 }
             }
         }
     }
 
+    #[inline]
     pub fn next_instr(&mut self) {
         self.instr_ptr += 1;
     }
@@ -720,6 +1171,7 @@ impl Thread {
 #[cfg(test)]
 mod test {
     use core::panic;
+    use std::io::Write;
 
     use super::*;
 
@@ -734,15 +1186,26 @@ mod test {
     fn test_thread() {
         let mut context = Context::default();
         context.instructions = vec![
-            Instructions::Load { value: Value::Int(5), addr: 0 },
-            Instructions::Load { value: Value::Int(10), addr: 1 },
-            Instructions::Add { addr1: 0, addr2: 1, addr3: 2 },
+            Instructions::Load {
+                value: Value::Int(5),
+                addr: 0,
+            },
+            Instructions::Load {
+                value: Value::Int(10),
+                addr: 1,
+            },
+            Instructions::Add {
+                addr1: 0,
+                addr2: 1,
+                addr3: 2,
+            },
             Instructions::Debug { addr: 2 },
             Instructions::End { exit_value: 2 },
         ];
         context.entry_instruction = 0;
         context.module.functions.push(Function {
             name: "main".to_string(),
+            stack_size: 3,
             args: vec![],
             ret: Type {
                 kind: Types::Word("int".to_string()),
@@ -765,7 +1228,7 @@ mod test {
         thread.memory.blocks.blocks.push(Block {
             data: vec![Value::Int(0), Value::Int(0), Value::Int(0)],
             free: false,
-            count: 0,
+            protect: false,
         });
         thread.stack_frames.frames.push(StackFrame {
             block: 0,
@@ -782,26 +1245,30 @@ mod test {
 
     #[test]
     /// simple iteration benchmark
-    /// 
+    ///
     /// This test is used to benchmark the runtime
-    /// 
+    ///
     /// # Results
-    /// 
+    ///
     /// On my machine, this test takes about 17.6896ms to run
-    /// 
+    ///
     /// This is a big improvement from my previous language, which took about 63ms to run
-    /// 
+    ///
     /// Also a lot better than Python, which took about 58ms to run (although while loop was used in Python)
-    /// 
+    ///
     /// If Python was used with a for loop, it would take about 20ms to run which is still slower than this runtime
-    /// 
+    ///
     /// # Note
-    /// 
+    ///
     /// Run test with `cargo test --release` to get accurate results or else the test might take up to 10x longer to run
-    /// 
+    ///
     /// This test is not accurate and should not be used as a benchmark
-    /// 
+    ///
     /// This is just a simple test to see how the runtime performs
+    ///
+    /// # Note 2
+    ///
+    /// After inlining `next_instr`, `set_value`, and `get_value` functions, the runtime took about 14ms to run (nice)
     fn benchmark() {
         const ITERATIONS: i64 = 1_000_000;
 
@@ -812,25 +1279,48 @@ mod test {
         const BRANCH: usize = 3;
         context.instructions = vec![
             // 0
-            Instructions::Load { value: Value::Int(0), addr: N },
-            Instructions::Load { value: Value::Int(ITERATIONS), addr: ITERS },
-            Instructions::Load { value: Value::Int(1), addr: ADD },
-
+            Instructions::Load {
+                value: Value::Int(0),
+                addr: N,
+            },
+            Instructions::Load {
+                value: Value::Int(ITERATIONS),
+                addr: ITERS,
+            },
+            Instructions::Load {
+                value: Value::Int(1),
+                addr: ADD,
+            },
             // 3
-            Instructions::Eq { addr1: N, addr2: ITERS, addr3: BRANCH },
-            Instructions::Not { addr1: BRANCH, addr2: BRANCH },
-            Instructions::Branch { cond: BRANCH, addr: 6, else_: 8 },
-
-            // 6
-            Instructions::Add { addr1: N, addr2: ADD, addr3: N },
+            Instructions::Eq {
+                addr1: N,
+                addr2: ITERS,
+                addr3: BRANCH,
+            },
+            Instructions::Not {
+                addr1: BRANCH,
+                addr2: BRANCH,
+            },
+            Instructions::Noop, // MarkGarbage 24ms | CollectGarbage 30ms // this was added to test the performance of the garbage collector
+            Instructions::Branch {
+                cond: BRANCH,
+                addr: 7,
+                else_: 9,
+            },
+            // 7
+            Instructions::Add {
+                addr1: N,
+                addr2: ADD,
+                addr3: N,
+            },
             Instructions::Goto { addr: 3 },
-
-            // 8
+            // 9
             Instructions::End { exit_value: N },
         ];
         context.entry_instruction = 0;
         context.module.functions.push(Function {
             name: "main".to_string(),
+            stack_size: 4,
             args: vec![],
             ret: Type {
                 kind: Types::Word("int".to_string()),
@@ -849,11 +1339,22 @@ mod test {
                 file: "".to_string(),
             },
         });
+
+        let serialized = bincode::serialize(&context).unwrap();
+        let file = std::fs::File::create("test.bin").unwrap();
+        let mut writer = std::io::BufWriter::new(file);
+        writer.write_all(&serialized).unwrap();
+
+        let serialized = serde_json::to_string(&context).unwrap();
+        let file = std::fs::File::create("test.json").unwrap();
+        let mut writer = std::io::BufWriter::new(file);
+        writer.write_all(serialized.as_bytes()).unwrap();
+
         let mut thread = context.create_thread();
         thread.memory.blocks.blocks.push(Block {
             data: vec![Value::Int(0), Value::Int(0), Value::Int(0), Value::Int(0)],
             free: false,
-            count: 0,
+            protect: false,
         });
         thread.stack_frames.frames.push(StackFrame {
             block: 0,
