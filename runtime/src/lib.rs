@@ -1341,12 +1341,12 @@ mod test {
         });
 
         let serialized = bincode::serialize(&context).unwrap();
-        let file = std::fs::File::create("test.bin").unwrap();
+        let file = std::fs::File::create("../junkfiles/test.bin").unwrap();
         let mut writer = std::io::BufWriter::new(file);
         writer.write_all(&serialized).unwrap();
 
         let serialized = serde_json::to_string(&context).unwrap();
-        let file = std::fs::File::create("test.json").unwrap();
+        let file = std::fs::File::create("../junkfiles/test.json").unwrap();
         let mut writer = std::io::BufWriter::new(file);
         writer.write_all(serialized.as_bytes()).unwrap();
 
