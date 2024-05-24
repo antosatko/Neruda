@@ -262,18 +262,13 @@ pub fn gen_parser() -> Parser {
             MatchToken::Word("class".to_string()),
             MatchToken::Word("delete".to_string()),
             MatchToken::Word("new".to_string()),
+            MatchToken::Word("trait".to_string()),
+            MatchToken::Word("type".to_string()),
             // todo:
             MatchToken::Word("impl".to_string()),
             MatchToken::Word("const".to_string()),
-            MatchToken::Word("trait".to_string()),
-            MatchToken::Word("type".to_string()),
             MatchToken::Word("as".to_string()),
             MatchToken::Word("switch".to_string()),
-            // in consideration:
-            MatchToken::Word("error".to_string()),
-            MatchToken::Word("try".to_string()),
-            MatchToken::Word("yeet".to_string()),
-            MatchToken::Word("catch".to_string()),
         ],
     };
     parser
@@ -2658,17 +2653,29 @@ pub fn gen_parser() -> Parser {
                 is: vec![
                     Rule::Maybe {
                         token: MatchToken::Node("parameter".to_string()),
-                        is: vec![Rule::While {
-                            token: MatchToken::Token(TokenKinds::Token(",".to_string())),
-                            rules: vec![Rule::Is {
-                                token: MatchToken::Node("parameter".to_string()),
-                                rules: vec![],
-                                parameters: vec![Parameters::Set("parameters".to_string())],
-                            }],
-                            parameters: vec![],
-                        }],
+                        is: vec![
+                            Rule::While {
+                                token: MatchToken::Token(TokenKinds::Token(",".to_string())),
+                                rules: vec![Rule::Maybe {
+                                    token: MatchToken::Node("parameter".to_string()),
+                                    is: vec![],
+                                    isnt: vec![Rule::Command {
+                                        command: Commands::Goto {
+                                            label: "end".to_string(),
+                                        },
+                                    }],
+                                    parameters: vec![Parameters::Set("parameters".to_string())],
+                                }],
+                                parameters: vec![],
+                            },
+                        ],
                         isnt: vec![],
                         parameters: vec![Parameters::Set("parameters".to_string())],
+                    },
+                    Rule::Command {
+                        command: Commands::Label {
+                            name: "end".to_string(),
+                        },
                     },
                     Rule::Is {
                         token: MatchToken::Token(TokenKinds::Token(")".to_string())),
@@ -3034,8 +3041,7 @@ pub enum A {
     c(
         /// some comment
         a: int,
-        /// todo: fix trailing comma error
-        a: float
+        b: float,
     ) = 9;
 
     fun new() {

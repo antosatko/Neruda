@@ -1,0 +1,10 @@
+[package]
+name = "runtime_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+runtime = { path = "../runtime" }
+
+[profile.release]
+debug = true

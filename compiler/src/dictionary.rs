@@ -90,7 +90,12 @@ pub enum Types {
         path: SymbolPath,
     },
 
-    Function, // TODO: Add function types
+    Function {
+        path: SymbolPath,
+        generics: Vec<GenericDeclaration>,
+        args: Vec<Argument>,
+        return_type: Box<Types>,
+    },
 
     /// A generic type
     /// refers to a type that is defined in function or class generics

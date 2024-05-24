@@ -98,6 +98,22 @@ pub enum Instructions {
         addr: InstrAddr,
         else_: InstrAddr,
     },
+    /// Additive goto, adds <addr> to the current instruction pointer
+    GotoAdd { addr: InstrAddr },
+    /// Additive branch, adds <addr> to the current instruction pointer if the value in stack[<cond>] is true else adds <else_> to the current instruction pointer
+    BranchAdd {
+        cond: StackAddr,
+        addr: InstrAddr,
+        else_: InstrAddr,
+    },
+    /// Subractive goto, subtracts <addr> from the current instruction pointer
+    GotoSub { addr: InstrAddr },
+    /// Subractive branch, subtracts <addr> from the current instruction pointer if the value in stack[<cond>] is true else subtracts <else_> from the current instruction pointer
+    BranchSub {
+        cond: StackAddr,
+        addr: InstrAddr,
+        else_: InstrAddr,
+    },
 
     /// Adds the values in stack[<addr1>] and stack[<addr2>] and stores the result in stack[<addr3>]
     Add {
@@ -870,53 +886,52 @@ impl Thread {
             function: entry,
         });
         loop {
-            let instr = self.ctx.instructions[self.instr_ptr];
+            let instr = &self.ctx.instructions[self.instr_ptr];
             match instr {
-                Instructions::Debug { addr } => {
-                    let value = self.memory.get_value(stack_block, addr);
-                    println!("{:?}", value);
-                    self.next_instr();
+                Instructions::GotoAdd { addr } => {
+                    self.instr_ptr += addr;
                 }
-                Instructions::End { exit_value } => {
-                    let value = self.memory.get_value(stack_block, exit_value);
-                    return Ok(value);
+                Instructions::BranchAdd { cond, addr, else_ } => {
+                    let value = self.memory.get_value(stack_block, *cond);
+                    if let Value::Bool(true) = value {
+                        self.instr_ptr += addr;
+                    } else {
+                        self.instr_ptr += else_;
+                    }
                 }
-                Instructions::Noop => self.next_instr(),
-                Instructions::Load { value, addr } => {
-                    self.memory.set_value(stack_block, addr, value);
-                    self.next_instr();
+                Instructions::GotoSub { addr } => {
+                    self.instr_ptr -= addr;
                 }
-                Instructions::LoadString { str, addr } => todo!(),
-                Instructions::Move { from, to } => {
-                    let value = self.memory.get_value(stack_block, from);
-                    self.memory.set_value(stack_block, to, value);
-                    self.next_instr();
-                }
-                Instructions::Swap { addr1, addr2 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
-                    self.memory.set_value(stack_block, addr1, value2);
-                    self.memory.set_value(stack_block, addr2, value1);
-                    self.next_instr();
+                Instructions::BranchSub { cond, addr, else_ } => {
+                    let value = self.memory.get_value(stack_block, *cond);
+                    if let Value::Bool(true) = value {
+                        self.instr_ptr -= addr;
+                    } else {
+                        self.instr_ptr -= else_;
+                    }
                 }
                 Instructions::Goto { addr } => {
-                    self.instr_ptr = addr;
+                    self.instr_ptr = *addr;
                 }
                 Instructions::Branch { cond, addr, else_ } => {
-                    let value = self.memory.get_value(stack_block, cond);
+                    let value = self.memory.get_value(stack_block, *cond);
                     if let Value::Bool(true) = value {
-                        self.instr_ptr = addr;
+                        self.instr_ptr = *addr;
                     } else {
-                        self.instr_ptr = else_;
+                        self.instr_ptr = *else_;
                     }
+                }
+                Instructions::Load { value, addr } => {
+                    self.memory.set_value(stack_block, *addr, *value);
+                    self.next_instr();
                 }
                 Instructions::Add {
                     addr1,
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a + b),
@@ -932,7 +947,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Sub {
@@ -940,8 +955,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a - b),
@@ -957,7 +972,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Mul {
@@ -965,8 +980,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a * b),
@@ -982,7 +997,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Div {
@@ -990,8 +1005,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a / b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a / b),
@@ -1007,7 +1022,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Mod {
@@ -1015,8 +1030,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Int(a % b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Uint(a % b),
@@ -1032,7 +1047,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Eq {
@@ -1040,8 +1055,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a == b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a == b),
@@ -1056,7 +1071,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Gt {
@@ -1064,8 +1079,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a > b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a > b),
@@ -1079,7 +1094,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Lt {
@@ -1087,8 +1102,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a < b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a < b),
@@ -1102,7 +1117,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Gteq {
@@ -1110,8 +1125,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a >= b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a >= b),
@@ -1125,7 +1140,7 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Lteq {
@@ -1133,8 +1148,8 @@ impl Thread {
                     addr2,
                     addr3,
                 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
-                    let value2 = self.memory.get_value(stack_block, addr2);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
                     let result = match (value1, value2) {
                         (Value::Int(a), Value::Int(b)) => Value::Bool(a <= b),
                         (Value::Uint(a), Value::Uint(b)) => Value::Bool(a <= b),
@@ -1148,11 +1163,11 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr3, result);
+                    self.memory.set_value(stack_block, *addr3, result);
                     self.next_instr();
                 }
                 Instructions::Not { addr1, addr2 } => {
-                    let value1 = self.memory.get_value(stack_block, addr1);
+                    let value1 = self.memory.get_value(stack_block, *addr1);
                     let result = match value1 {
                         Value::Bool(a) => Value::Bool(!a),
                         _ => {
@@ -1162,7 +1177,19 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, addr2, result);
+                    self.memory.set_value(stack_block, *addr2, result);
+                    self.next_instr();
+                }
+                Instructions::Move { from, to } => {
+                    let value = self.memory.get_value(stack_block, *from);
+                    self.memory.set_value(stack_block, *to, value);
+                    self.next_instr();
+                }
+                Instructions::Swap { addr1, addr2 } => {
+                    let value1 = self.memory.get_value(stack_block, *addr1);
+                    let value2 = self.memory.get_value(stack_block, *addr2);
+                    self.memory.set_value(stack_block, *addr1, value2);
+                    self.memory.set_value(stack_block, *addr2, value1);
                     self.next_instr();
                 }
                 Instructions::Open { function, addr } => {
@@ -1170,20 +1197,22 @@ impl Thread {
                         block: self
                             .memory
                             .blocks
-                            .allocate(Block::new(self.ctx.module.functions[function].stack_size)),
-                        return_value: addr,
+                            .allocate(Block::new(self.ctx.module.functions[*function].stack_size)),
+                        return_value: *addr,
                         return_addr: self.instr_ptr + 1,
-                        function: function,
+                        function: *function,
                     };
                     self.stack_frames.next = frame;
+                    self.next_instr();
                 }
                 Instructions::Arg { addr, to } => {
-                    let value = self.memory.get_value(stack_block, addr);
+                    let value = self.memory.get_value(stack_block, *addr);
                     self.memory
-                        .set_value(self.stack_frames.next.block, to, value);
+                        .set_value(self.stack_frames.next.block, *to, value);
                     self.next_instr();
                 }
                 Instructions::Jump => {
+                    self.stack_frames.next.return_addr = self.instr_ptr + 1;
                     self.instr_ptr =
                         self.ctx.module.functions[self.stack_frames.next.function].start;
                     stack_block = self.stack_frames.next.block;
@@ -1191,7 +1220,7 @@ impl Thread {
                 }
                 Instructions::Return { addr } => {
                     self.memory.blocks.deallocate(stack_block);
-                    let value = self.memory.get_value(stack_block, addr);
+                    let value = self.memory.get_value(stack_block, *addr);
                     let current_frame = match self.stack_frames.pop() {
                         Some(frame) => frame,
                         None => return Err(Error::LostCurrentFrame),
@@ -1206,14 +1235,14 @@ impl Thread {
                     stack_block = prev_block;
                 }
                 Instructions::AllocStatic { size, addr } => {
-                    let block = Block::new(size);
+                    let block = Block::new(*size);
                     let block_index = self.memory.blocks.allocate(block);
                     self.memory
-                        .set_value(stack_block, addr, Value::Block { block: block_index });
+                        .set_value(stack_block, *addr, Value::Block { block: block_index });
                     self.next_instr();
                 }
                 Instructions::AllocDynamic { size, addr } => {
-                    let size = self.memory.get_value(stack_block, size);
+                    let size = self.memory.get_value(stack_block, *size);
                     let block = Block::new(match size {
                         Value::Int(size) => size as usize,
                         _ => {
@@ -1225,73 +1254,65 @@ impl Thread {
                     });
                     let block_index = self.memory.blocks.allocate(block);
                     self.memory
-                        .set_value(stack_block, addr, Value::Block { block: block_index });
+                        .set_value(stack_block, *addr, Value::Block { block: block_index });
                     self.next_instr();
                 }
                 Instructions::AllocId { id, kind, addr } => {
                     let size = match kind {
-                        ModuleType::Array => 1, // arrays are always 1 todo: might change in the future
-                        ModuleType::Tuple => self.ctx.module.tuples[id].types.len(),
-                        ModuleType::Class => self.ctx.module.classes[id].fields.len(),
+                        ModuleType::Array => 1,
+                        ModuleType::Tuple => self.ctx.module.tuples[*id].types.len(),
+                        ModuleType::Class => self.ctx.module.classes[*id].fields.len(),
                         _ => {
                             return Err(Error::InvalidModuleType {
                                 instr: self.instr_ptr,
-                                kind,
+                                kind: *kind,
                             })
                         }
                     };
                     let block = Block::new(size);
                     let block_index = self.memory.blocks.allocate(block);
                     self.memory
-                        .set_value(stack_block, addr, Value::Block { block: block_index });
+                        .set_value(stack_block, *addr, Value::Block { block: block_index });
                     self.next_instr();
                 }
                 Instructions::Dealloc { addr } => {
-                    // TODO: add dealloc for strings and userdata
-                    let block = match self.memory.get_value(stack_block, addr) {
-                        Value::Block { block } => block,
+                    match self.memory.get_value(stack_block, *addr) {
+                        Value::Block { block } => self.memory.blocks.deallocate(block),
+                        Value::String { str } => self.memory.strings.deallocate(str),
+                        Value::Userdata { data } => self.memory.userdata.deallocate(data),
                         _ => {
                             return Err(Error::InvalidType {
                                 instr: self.instr_ptr,
-                                value1: self.memory.get_value(stack_block, addr),
+                                value1: self.memory.get_value(stack_block, *addr),
                             })
                         }
                     };
-                    self.memory.blocks.deallocate(block);
                     self.next_instr();
                 }
                 Instructions::Realloc { addr, size } => {
-                    let block = match self.memory.get_value(stack_block, addr) {
+                    let block = match self.memory.get_value(stack_block, *addr) {
                         Value::Block { block } => block,
                         _ => {
                             return Err(Error::InvalidType {
                                 instr: self.instr_ptr,
-                                value1: self.memory.get_value(stack_block, addr),
+                                value1: self.memory.get_value(stack_block, *addr),
                             })
                         }
                     };
-                    let size = match self.memory.get_value(stack_block, size) {
+                    let size = match self.memory.get_value(stack_block, *size) {
                         Value::Int(size) => size as usize,
                         _ => {
                             return Err(Error::InvalidType {
                                 instr: self.instr_ptr,
-                                value1: self.memory.get_value(stack_block, size),
+                                value1: self.memory.get_value(stack_block, *size),
                             })
                         }
                     };
                     self.memory.blocks.realloc(block, size);
                     self.next_instr();
                 }
-                Instructions::CollectGarbage => {
-                    self.memory.collect_garbage(&self.stack_frames);
-                    self.next_instr();
-                }
-                Instructions::MarkGarbage => {
-                    self.memory.mark_garbage(&self.stack_frames);
-                    self.next_instr();
-                }
                 Instructions::ReadPtr { ptr, to } => {
-                    let ptr = self.memory.get_value(stack_block, ptr);
+                    let ptr = self.memory.get_value(stack_block, *ptr);
                     let value = match ptr {
                         Value::Pointer { block, offset } => self.memory.get_value(block, offset),
                         Value::CharPtr { str, offset } => {
@@ -1310,12 +1331,12 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, to, value);
+                    self.memory.set_value(stack_block, *to, value);
                     self.next_instr();
                 }
                 Instructions::WritePtr { ptr, value } => {
-                    let value = self.memory.get_value(stack_block, value);
-                    let ptr = self.memory.get_value(stack_block, ptr);
+                    let value = self.memory.get_value(stack_block, *value);
+                    let ptr = self.memory.get_value(stack_block, *ptr);
                     match ptr {
                         Value::Pointer { block, offset } => {
                             self.memory.set_value(block, offset, value);
@@ -1334,14 +1355,14 @@ impl Thread {
                     add_offset,
                     to,
                 } => {
-                    let ptr = self.memory.get_value(stack_block, ptr);
-                    let add_offset = match self.memory.get_value(stack_block, add_offset) {
+                    let ptr = self.memory.get_value(stack_block, *ptr);
+                    let add_offset = match self.memory.get_value(stack_block, *add_offset) {
                         Value::Int(offset) => offset as usize,
                         Value::Uint(offset) => offset as usize,
                         _ => {
                             return Err(Error::InvalidType {
                                 instr: self.instr_ptr,
-                                value1: self.memory.get_value(stack_block, add_offset),
+                                value1: self.memory.get_value(stack_block, *add_offset),
                             })
                         }
                     };
@@ -1381,7 +1402,15 @@ impl Thread {
                             })
                         }
                     };
-                    self.memory.set_value(stack_block, to, new_ptr);
+                    self.memory.set_value(stack_block, *to, new_ptr);
+                    self.next_instr();
+                }
+                Instructions::LoadString { str, addr } => {
+                    let str = self.memory.strings.allocate(StringObject {
+                        data: self.ctx.module.strings[*str].clone(),
+                        free: false,
+                    });
+                    self.memory.set_value(stack_block, *addr, Value::String { str });
                     self.next_instr();
                 }
                 Instructions::CallNative {
@@ -1389,14 +1418,33 @@ impl Thread {
                     function,
                     addr,
                 } => {
-                    let lib = self.ctx.module.native_libs[lib];
-                    let value = match lib(self, function) {
+                    let lib = self.ctx.module.native_libs[*lib];
+                    let addr = *addr;
+                    let value = match lib(self, *function) {
                         Ok(value) => value,
                         Err(err) => return Err(Error::NativeLibErr(err)),
                     };
                     self.memory.set_value(stack_block, addr, value);
                     self.next_instr();
                 }
+                Instructions::Debug { addr } => {
+                    let value = self.memory.get_value(stack_block, *addr);
+                    println!("{:?}", value);
+                    self.next_instr();
+                }
+                Instructions::CollectGarbage => {
+                    self.memory.collect_garbage(&self.stack_frames);
+                    self.next_instr();
+                }
+                Instructions::MarkGarbage => {
+                    self.memory.mark_garbage(&self.stack_frames);
+                    self.next_instr();
+                }
+                Instructions::End { exit_value } => {
+                    let value = self.memory.get_value(stack_block, *exit_value);
+                    return Ok(value);
+                }
+                Instructions::Noop => self.next_instr(),
             }
         }
     }
@@ -1407,7 +1455,6 @@ impl Thread {
     }
 }
 
-/// TODO: Errors will be added based on the needs of the runtime
 #[derive(Debug)]
 pub enum Error {
     InvalidTypes {
@@ -1522,7 +1569,7 @@ mod test {
     ///
     /// After inlining `next_instr`, `set_value`, and `get_value` functions, the runtime took about 14ms to run (nice)
     fn benchmark() -> anyhow::Result<()> {
-        const ITERATIONS: i64 = 1_000_000;
+        const ITERATIONS: i64 = 1_000_000 - 999999;
 
         let mut context = Context::default();
         const N: usize = 0;
@@ -1671,6 +1718,181 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn fib() {
+        let start_mem = PEAK_ALLOC.current_usage_as_kb();
+        println!("Memory: {}kB", start_mem);
+        let mut context = Context::default();
+        context.instructions = vec![
+            // main
+            // var 0 = 10
+            Instructions::Load {
+                value: Value::Int(33),
+                addr: 0,
+            },
+            // open fib
+            Instructions::Open {
+                function: 1,
+                addr: 1,
+            },
+            // arg 0 = 10; var 1 = fib(10)
+            Instructions::Arg {
+                addr: 0,
+                to: 0,
+            },
+            // call fib
+            Instructions::Jump,
+            Instructions::End { exit_value: 1 },
+
+            // fib; var 0 = n
+            // var 1 = 1
+            // if n <= 1 return n
+            Instructions::Load {
+                value: Value::Int(1),
+                addr: 1,
+            },
+            // var 3 = n <= 1
+            Instructions::Lteq {
+                addr1: 0,
+                addr2: 1,
+                addr3: 2,
+            },
+            // if var 3 return n
+            Instructions::BranchAdd {
+                cond: 2,
+                addr: 1,
+                else_: 2,
+            },
+            // return n
+            Instructions::Return { addr: 0 },
+
+            // var 2 = n - 1
+            Instructions::Sub {
+                addr1: 0,
+                addr2: 1,
+                addr3: 2,
+            },
+            // var 4 = fib(n - 1)
+            Instructions::Open {
+                function: 1,
+                addr: 4,
+            },
+            // arg 0 = n - 1
+            Instructions::Arg {
+                addr: 2,
+                to: 0,
+            },
+            // call fib
+            Instructions::Jump,
+            // var 5 = n - 2
+            Instructions::Sub {
+                addr1: 2, // previous result (n - 1)
+                addr2: 1,
+                addr3: 5,
+            },
+            // var 6 = fib(n - 2)
+            Instructions::Open {
+                function: 1,
+                addr: 6,
+            },
+            // arg 0 = n - 2
+            Instructions::Arg {
+                addr: 5,
+                to: 0,
+            },
+            // call fib
+            Instructions::Jump,
+            // var 7 = var 4 + var 6
+            Instructions::Add {
+                addr1: 4,
+                addr2: 6,
+                addr3: 7,
+            },
+            // return var 7
+            Instructions::Return { addr: 7 },
+        ];
+        context.module.functions.push(Function {
+            name: "main".to_string(),
+            stack_size: 2,
+            args: vec![],
+            ret: Type {
+                kind: Types::Word("int".to_string()),
+                refs: 0,
+                line: Line {
+                    line: 0,
+                    column: 0,
+                    file: "".to_string(),
+                },
+            },
+            start: 0,
+            end: 3,
+            line: Line {
+                line: 0,
+                column: 0,
+                file: "".to_string(),
+            },
+        });
+        context.module.functions.push(Function {
+            name: "fib".to_string(),
+            stack_size: 8,
+            args: vec![],
+            ret: Type {
+                kind: Types::Word("int".to_string()),
+                refs: 0,
+                line: Line {
+                    line: 0,
+                    column: 0,
+                    file: "".to_string(),
+                },
+            },
+            start: 5,
+            end: 17,
+            line: Line {
+                line: 0,
+                column: 0,
+                file: "".to_string(),
+            },
+        });
+        let ctx_mem = PEAK_ALLOC.current_usage_as_kb();
+        println!("Memory: {}kB", ctx_mem);
+
+        let serialized = bincode::serialize(&context).unwrap();
+        let file = std::fs::File::create("../junkfiles/fib.bin").unwrap();
+        let mut writer = std::io::BufWriter::new(file);
+        writer.write_all(&serialized).unwrap();
+
+        let serialized = serde_json::to_string(&context).unwrap();
+        let file = std::fs::File::create("../junkfiles/fib.json").unwrap();
+        let mut writer = std::io::BufWriter::new(file);
+        writer.write_all(serialized.as_bytes()).unwrap();
+
+        let mut thread = context.create_thread();
+        let thread_mem = PEAK_ALLOC.current_usage_as_kb();
+        println!("Memory: {}kB", thread_mem);
+
+
+        let time = std::time::Instant::now();
+        let value = thread.run(0).unwrap();
+        println!("Elapsed: {:?}", time.elapsed());
+
+        let peak_mem = PEAK_ALLOC.peak_usage_as_kb();
+
+        println!("{:?}", value);
+        println!("Memory: {}kB -> {}kB -> {}kB", start_mem, ctx_mem, thread_mem);
+        println!("Peak Memory: {}kB", peak_mem);
+
+        assert_eq!(value, Value::Int(55));
+
+        if FAIL_ALL {
+            panic!("Just testing the output, everything is fine!")
+        }
+    }
+
     /// If true, all tests will fail so that the output can be seen
     pub const FAIL_ALL: bool = false;
+
+    use peak_alloc::PeakAlloc;
+    #[global_allocator]
+    static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 }
+
